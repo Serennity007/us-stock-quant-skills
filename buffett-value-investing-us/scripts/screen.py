@@ -35,6 +35,14 @@ except ImportError:
 
 YEARS = 5
 OCF_ITEM = "经营活动产生的现金流量净额"
+CAPEX_ITEM = "购买固定资产"
+# 股东权益 ≤ 0 的判据：资产负债率 ≥ 100%（负债总额超过资产总额）。
+# 回购把权益买成负数时，ROE 与 PB 都会失真（分母趋零），不能当成"优秀"打分。
+NEGATIVE_EQUITY_DEBT_PCT = 100.0
+# ROE 高于此值同样视为失真（权益过薄），不用于构造 PB。
+ROE_SANITY_CAP = 100.0
+PASS_LINE = 80
+WATCH_LINE = 60
 DEFAULT_UNIVERSE = Path(__file__).resolve().parent.parent / "data" / "universe_nasdaq100.json"
 
 
@@ -85,23 +93,34 @@ def numeric(df: pd.DataFrame, col: str) -> pd.Series:
     return pd.to_numeric(df[col], errors="coerce").dropna()
 
 
-def ocf_positive_years(ticker: str) -> int:
-    """近 YEARS 个财年经营现金流净额为正的年数。取不到返回 0（不阻断打分）。"""
+def fcf_positive_years(ticker: str):
+    """近 YEARS 个财年自由现金流为正的年数，以及最新一年的 FCF（美元）。
+
+    A 股版用「经营现金流为正」是因为占款与应收造假常见；美股大型公司几乎不可能连续
+    五年经营现金流为负——实测 90% 的标的拿满这 20 分，零区分度。改用 FCF（经营现金流
+    净额 + 购买固定资产，后者接口内已为负值）后，资本开支吃掉现金流的公司才会被区分。
+    """
     try:
         df = _retry_call(lambda: ak.stock_financial_us_report_em(stock=ticker, symbol="现金流量表", indicator="年报"))
     except Exception:
-        return 0
+        return 0, None
     if df is None or df.empty or "ITEM_NAME" not in df.columns:
-        return 0
-    rows = df[df["ITEM_NAME"].astype(str).str.strip() == OCF_ITEM]
+        return 0, None
+    rows = df[df["ITEM_NAME"].astype(str).str.strip().isin([OCF_ITEM, CAPEX_ITEM])].copy()
     if rows.empty:
-        return 0
-    vals = pd.to_numeric(rows["AMOUNT"], errors="coerce").dropna()
-    vals = rows.assign(value=vals).dropna(subset=["value"])
-    if vals.empty:
-        return 0
-    latest = vals.drop_duplicates(subset=["REPORT_DATE"], keep="last").sort_values("REPORT_DATE").tail(YEARS)
-    return int((latest["value"] > 0).sum())
+        return 0, None
+    rows["value"] = pd.to_numeric(rows["AMOUNT"], errors="coerce")
+    rows["REPORT_DATE"] = pd.to_datetime(rows["REPORT_DATE"], errors="coerce")
+    rows = rows.dropna(subset=["value", "REPORT_DATE"])
+    wide = rows.pivot_table(index="REPORT_DATE", columns="ITEM_NAME", values="value", aggfunc="last")
+    if OCF_ITEM not in wide.columns:
+        return 0, None
+    capex = wide[CAPEX_ITEM] if CAPEX_ITEM in wide.columns else pd.Series(0.0, index=wide.index)
+    wide["fcf"] = wide[OCF_ITEM] + capex.fillna(0.0)
+    recent = wide.sort_index().tail(YEARS)
+    if recent.empty:
+        return 0, None
+    return int((recent["fcf"] > 0).sum()), float(recent["fcf"].iloc[-1])
 
 
 def valuation_percentiles(ticker: str, ind: pd.DataFrame):
@@ -141,7 +160,10 @@ def valuation_percentiles(ticker: str, ind: pd.DataFrame):
         if seg.empty:
             continue
         pe = seg["close"] / float(e)
-        pb = pe * (float(r) / 100) if pd.notna(r) and r > 0 else float("nan")
+        # PB = PE × ROE 是恒等式，但输入失真时结果也失真：权益被回购买成接近零
+        # 会让 ROE 出现 5,000% 甚至 22,000% 这种读数（实测 BKNG、ORLY、MAR），
+        # 乘出来的 PB 分位毫无意义，因此只接受 0 < ROE ≤ ROE_SANITY_CAP。
+        pb = pe * (float(r) / 100) if pd.notna(r) and 0 < float(r) <= ROE_SANITY_CAP else float("nan")
         frames.append(pd.DataFrame({"date": seg["date"], "pe": pe, "pb": pb}))
     if not frames:
         return None, None
@@ -163,7 +185,23 @@ def score_one(ticker: str) -> dict:
     gross = numeric(ind, "GROSS_PROFIT_RATIO")
     debt = numeric(ind, "DEBT_ASSET_RATIO")
 
-    roe_score = sum(6 if v > 15 else (3 if v > 12 else 0) for v in roe)
+    # 资产负债率 ≥ 100% ⇔ 负债总额超过资产总额 ⇔ 股东权益 ≤ 0。
+    # 此时 ROE 的分母趋零（实测 BKNG 峰值 22,573%、ORLY 5,863%、MAR 237%），
+    # 既不该按「优秀」白送 30 分，也不该按「高杠杆」把负债率判 0 分——
+    # Booking、O'Reilly 这类其实是净现金公司。两项一律记 N/A。
+    debt_latest = round(float(debt.iloc[-1]), 1) if len(debt) else None
+    equity_negative = debt_latest is not None and debt_latest >= NEGATIVE_EQUITY_DEBT_PCT
+    thin_equity = (not equity_negative) and len(roe) > 0 and float(roe.max()) > ROE_SANITY_CAP
+    # 两档处理，不要混为一谈：
+    #   权益 ≤ 0（BKNG/ORLY/SBUX）→ 三项失真，整只逐出排名，交人工判断；
+    #   权益为正但 ROE > 100%（NVDA）→ ROE 是真实盈利能力，照常计分，只是不能用它推 PB。
+    flag = "权益≤0，ROE/负债率/PB 均不适用" if equity_negative else ""
+    note = "ROE>100%，PB 不适用" if thin_equity else ""
+
+    if equity_negative:
+        roe_score = 0
+    else:
+        roe_score = sum(6 if v > 15 else (3 if v > 12 else 0) for v in roe)
 
     gross_score = 0
     if len(gross):
@@ -172,16 +210,19 @@ def score_one(ticker: str) -> dict:
         spread = gross.max() - gross.min()
         gross_score += 10 if spread < 5 else (5 if spread < 10 else 0)
 
-    debt_score = 0
-    if len(debt):
-        latest_d = debt.iloc[-1]
-        debt_score = 15 if latest_d < 40 else (8 if latest_d < 50 else (3 if latest_d < 65 else 0))
+    if equity_negative:
+        debt_score = 0
+    else:
+        debt_score = 0 if debt_latest is None else (
+            15 if debt_latest < 40 else (8 if debt_latest < 50 else (3 if debt_latest < 65 else 0)))
 
-    cf_years = ocf_positive_years(ticker)
+    cf_years, fcf_latest = fcf_positive_years(ticker)
     cf_score = min(cf_years, YEARS) * 4
     time.sleep(0.15)
 
     pe_pct, pb_pct = valuation_percentiles(ticker, ind)
+    if equity_negative or thin_equity:
+        pb_pct = None
     val_score = 0
     if pe_pct is not None:
         val_score += 8 if pe_pct < 0.3 else (4 if pe_pct < 0.5 else 0)
@@ -192,14 +233,17 @@ def score_one(ticker: str) -> dict:
     return {
         "ticker": ticker,
         "total": total,
+        "flag": flag,
+        "note": note,
         "roe_score": roe_score,
         "roe_annual": ",".join(f"{v:.1f}" for v in roe.tolist()) if len(roe) else "—",
         "gross_score": gross_score,
         "gross_mean": round(float(gross.mean()), 1) if len(gross) else None,
         "debt_score": debt_score,
-        "debt_latest": round(float(debt.iloc[-1]), 1) if len(debt) else None,
-        "cashflow_score": cf_score,
-        "cashflow_pos_years": cf_years,
+        "debt_latest": debt_latest,
+        "fcf_score": cf_score,
+        "fcf_pos_years": cf_years,
+        "fcf_latest_yi": round(fcf_latest / 1e8, 1) if fcf_latest is not None else None,
         "valuation_score": val_score,
         "pe_pct": round(pe_pct, 2) if pe_pct is not None else None,
         "pb_pct": round(pb_pct, 2) if pb_pct is not None else None,
@@ -246,22 +290,39 @@ def main():
 
     df = pd.DataFrame(rows).sort_values("total", ascending=False)
     df.to_csv(args.out, index=False, encoding="utf-8-sig")
-    print(f"\n=== 前 {min(args.top, len(df))} 名（完整结果见 {args.out}）===")
+
+    # 指标失真的标的（股东权益 ≤ 0 等）不进主榜单排名：它们的 ROE 与负债率都是
+    # N/A，留在榜里会既压低分数又误导排序，单列一节让人工判断。
+    ranked = df[df["flag"] == ""]
+    distorted = df[df["flag"] != ""]
+
+    print(f"\n=== 前 {min(args.top, len(ranked))} 名（完整结果见 {args.out}）===")
     display_cols = ["ticker", "total", "roe_score", "gross_score", "debt_score",
-                    "cashflow_score", "valuation_score", "pe_pct", "pb_pct", "data_years"]
-    display_df = df.head(args.top)[display_cols].copy()
+                    "fcf_score", "valuation_score", "pe_pct", "pb_pct", "data_years"]
+    display_df = ranked.head(args.top)[display_cols].copy()
     for c in ("pe_pct", "pb_pct"):
         display_df[c] = display_df[c].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "—")
     print(display_df.to_string(index=False))
 
-    incomplete = df[df["data_years"] < YEARS]
+    if not distorted.empty:
+        print(f"\n=== 指标失真，未参与排名（{len(distorted)} 只）===")
+        print(distorted[["ticker", "total", "gross_score", "fcf_score", "valuation_score",
+                         "debt_latest", "flag"]].to_string(index=False))
+        print("说明：股东权益 ≤ 0 时 ROE 与 PB 失去含义、负债率也不代表杠杆风险，需回到资产负债表原值人工判断。")
+
+    noted = ranked[ranked["note"] != ""]
+    if not noted.empty:
+        print("\n以下标的 ROE > 100%（薄权益但为真实盈利，仍参与排名），但 PB 分位不适用：")
+        print(", ".join(noted["ticker"].tolist()))
+
+    incomplete = ranked[ranked["data_years"] < YEARS]
     if not incomplete.empty:
         print(f"\n注意: 以下 {len(incomplete)} 只财年数据不足 {YEARS} 年，分数参考性下降：")
         print(", ".join(incomplete["ticker"].tolist()))
     if failed:
         print(f"\n取数失败 {len(failed)} 只: {', '.join(t for t, _ in failed)}")
-    print(f"\n成功 {len(rows)} 只，失败 {len(failed)} 只。")
-    print("判定线: >=70 进入人工护城河核查; 50-69 有短板; <50 不符合框架。")
+    print(f"\n成功 {len(rows)} 只（其中排名 {len(ranked)} 只、失真单列 {len(distorted)} 只），失败 {len(failed)} 只。")
+    print(f"判定线: >={PASS_LINE} 进入人工护城河核查; {WATCH_LINE}-{PASS_LINE - 1} 有短板; <{WATCH_LINE} 不符合框架。")
 
 
 if __name__ == "__main__":

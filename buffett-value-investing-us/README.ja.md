@@ -31,7 +31,7 @@ ticker  total  roe_score  gross_score  debt_score  cashflow_score  valuation_sco
    ADM     45         12           10           3              20                0   0.98   0.53           5
 ```
 
-判定ライン：**≥70 は堀の人手確認へ／50–69 は明確な弱点あり／<50 は本フレームに非該当**。完全なランキングは [docs/demo.md](docs/demo.md)。
+判定ライン：**≥80 は堀の人手確認へ／60–80 は明確な弱点あり／<60 は本フレームに非該当**。完全なランキングは [docs/demo.md](docs/demo.md)。
 
 ## スクリーニング基準
 
@@ -40,7 +40,7 @@ ticker  total  roe_score  gross_score  debt_score  cashflow_score  valuation_sco
 | ROE | 5 か年連続 > 15% | `ROE_AVG` |
 | 粗利率 | 平均 > 30% かつ 5 年の幅 < 5pp | `GROSS_PROFIT_RATIO` |
 | 負債比率 | < 50%（金融は該当せず） | `DEBT_ASSET_RATIO` |
-| 営業 CF | 5 か年連続で黒字 | キャッシュフロー計算書・営業活動による CF |
+| フリーキャッシュフロー | 5 か年連続で黒字（営業CF + 固定資産購入） | キャッシュフロー計算書から2項目を取得 |
 | バリュエーション | PE / PB が自社 5 年の低位 | 日足終値 × 年度 EPS / ROE で算出 |
 
 配点は [references/scoring_rules.md](references/scoring_rules.md)、堀と資本配分の判断枠組みは [references/buffett_principles.md](references/buffett_principles.md) を参照。

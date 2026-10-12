@@ -40,10 +40,14 @@ ticker  total  roe_score  gross_score  debt_score  cashflow_score  valuation_sco
 | ROE | 连续 5 年 > 15% | `ROE_AVG` |
 | 毛利率 | 均值 > 30% 且五年极差 < 5pp | `GROSS_PROFIT_RATIO` |
 | 资产负债率 | < 50%（金融股不适用） | `DEBT_ASSET_RATIO` |
-| 经营现金流 | 连续 5 年为正 | 现金流量表 `经营活动产生的现金流量净额` |
+| 自由现金流 | 连续 5 年为正（FCF = 经营现金流净额 + 购买固定资产） | 现金流量表两项同取 |
 | 估值 | PE / PB 处于自身五年低位 | 日线价 × 财年 EPS / ROE 自行构造 |
 
 权重与判定线见 [references/scoring_rules.md](references/scoring_rules.md)；护城河与资本配置的人工判断框架见 [references/buffett_principles.md](references/buffett_principles.md)。
+
+## 失真处理（美股特有）
+
+回购把股东权益买薄甚至买成负数时，ROE 与 PB 会同时失真（实测 BKNG 的 ROE 峰值 22,573%、ORLY 5,863%）。脚本用「资产负债率 ≥ 100% ⇔ 权益 ≤ 0」判定，命中后 **ROE 与负债率记 N/A、PB 分位置空，整只逐出主榜单单列人工判断**，既不白送分也不误罚。权益为正但 ROE > 100%（如 NVDA）属真实盈利，仍参与排名，只是停用 PB 分位。
 
 ## 与 A 股版的两处关键差异
 

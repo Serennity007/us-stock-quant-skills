@@ -31,7 +31,7 @@ ticker  total  roe_score  gross_score  debt_score  cashflow_score  valuation_sco
    ADM     45         12           10           3              20                0   0.98   0.53           5
 ```
 
-Cut lines: **≥70 go to manual moat review; 50–69 have a clear weak leg; <50 does not fit the framework.** Full ranking in [docs/demo.md](docs/demo.md).
+Cut lines: **≥80 go to manual moat review; 60–79 have a clear weak leg; <60 does not fit the framework.** Full ranking in [docs/demo.md](docs/demo.md).
 
 ## The gates
 
@@ -40,7 +40,7 @@ Cut lines: **≥70 go to manual moat review; 50–69 have a clear weak leg; <50 
 | ROE | > 15% in all five years | `ROE_AVG` |
 | Gross margin | mean > 30% and five-year spread < 5pp | `GROSS_PROFIT_RATIO` |
 | Debt-to-assets | < 50% (not applicable to financials) | `DEBT_ASSET_RATIO` |
-| Operating cash flow | positive in all five years | cash-flow statement, net operating CF |
+| Free cash flow | positive in all five years (OCF + purchases of fixed assets) | both items from the cash-flow statement |
 | Valuation | PE / PB low in the stock's own five-year range | built from daily price × fiscal-year EPS / ROE |
 
 Weights in [references/scoring_rules.md](references/scoring_rules.md); the judgment framework for moats and capital allocation in [references/buffett_principles.md](references/buffett_principles.md).
