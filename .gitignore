@@ -1,0 +1,14 @@
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 脚本产物
+*.csv
+screen_result.csv
+result.csv
+*.md.bak
+.DS_Store
+*.log
