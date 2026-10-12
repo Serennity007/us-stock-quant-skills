@@ -21,17 +21,25 @@ python scripts/screen.py --tickers MSFT,COST,PEP,ADBE
 python scripts/analyze.py --ticker MSFT
 ```
 
-## 输出示例（2026-10-11 实测）
+## 输出示例（2026-10-12 实测，7 只抽样）
 
 ```
-ticker  total  roe_score  gross_score  debt_score  cashflow_score  valuation_score pe_pct pb_pct  data_years
-  MSFT     89         30           20           8              20               11   0.37   0.22           5
-   PEP     85         30           20           0              20               15   0.11   0.03           5
-  COST     70         30           10           3              20                7   0.45   0.40           5
-   ADM     45         12           10           3              20                0   0.98   0.53           5
+ticker  total  roe_score  gross_score  debt_score  fcf_score  valuation_score pe_pct pb_pct  data_years
+  MSFT     89         30           20           8         20               11   0.37   0.22           5
+  ADBE     88         30           20           3         20               15   0.01   0.01           5
+  NVDA     83         30           10          15         20                8   0.26      —           5
+  COST     70         30           10           3         20                7   0.45   0.40           5
 ```
 
-判定线：**≥70 进入人工护城河核查；50–69 有明确短板；<50 不符合本框架**。完整榜单见 [docs/demo.md](docs/demo.md)。
+```
+=== 指标失真，未参与排名（3 只）===
+ticker  total  gross_score  fcf_score  valuation_score  debt_latest                 flag
+  BKNG     48           20         20                8        119.1 权益≤0，ROE/负债率/PB 均不适用
+  ORLY     44           20         20                4        104.6 权益≤0，ROE/负债率/PB 均不适用
+  SBUX     40           20         20                0        125.3 权益≤0，ROE/负债率/PB 均不适用
+```
+
+判定线：**≥80 进入人工护城河核查；60–79 有明确短板；<60 不符合本框架**。完整榜单见 [docs/demo.md](docs/demo.md)。
 
 ## 筛选标准
 
@@ -49,10 +57,11 @@ ticker  total  roe_score  gross_score  debt_score  cashflow_score  valuation_sco
 
 回购把股东权益买薄甚至买成负数时，ROE 与 PB 会同时失真（实测 BKNG 的 ROE 峰值 22,573%、ORLY 5,863%）。脚本用「资产负债率 ≥ 100% ⇔ 权益 ≤ 0」判定，命中后 **ROE 与负债率记 N/A、PB 分位置空，整只逐出主榜单单列人工判断**，既不白送分也不误罚。权益为正但 ROE > 100%（如 NVDA）属真实盈利，仍参与排名，只是停用 PB 分位。
 
-## 与 A 股版的两处关键差异
+## 与 A 股版的三处关键差异
 
 1. **股票池是静态清单**：A 股版可实时拉沪深300 成分股，美股的全市场接口在部分网络环境不可达，因此改为随仓库附带 `data/universe_nasdaq100.json`（含 `source` / `as_of` / `fetched_at`），成分股季度调整需自行更新，或用 `--tickers` 覆盖。
-2. **PE/PB 分位是近似值**：美股没有逐日历史估值接口。日 PE = 收盘价 ÷ 当年基本 EPS，日 PB = 日 PE × 当年 ROE（P/B = P/E × E/B 恒等）。假定财年内 EPS/ROE 不变、不含财报发布滞后，只用于判断「相对自身历史贵还是便宜」。
+2. **现金流与失真口径按美股重定**：改用 FCF、负权益记 N/A，判定线抬到 80。因此**分数与 A 股版不再直接可比**，详见 [references/scoring_rules.md](references/scoring_rules.md)。
+3. **PE/PB 分位是近似值**：美股没有逐日历史估值接口。日 PE = 收盘价 ÷ 当年基本 EPS，日 PB = 日 PE × 当年 ROE（P/B = P/E × E/B 恒等）。假定财年内 EPS/ROE 不变、不含财报发布滞后，只用于判断「相对自身历史贵还是便宜」。
 
 ## 配套文件
 

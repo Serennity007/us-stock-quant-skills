@@ -21,17 +21,27 @@ python scripts/screen.py --tickers MSFT,COST,PEP,ADBE
 python scripts/analyze.py --ticker MSFT
 ```
 
-## 出力例（2026-10-11 実測）
+## 出力例（2026-10-12 実測、7 銘柄サンプル）
 
 ```
-ticker  total  roe_score  gross_score  debt_score  cashflow_score  valuation_score pe_pct pb_pct  data_years
-  MSFT     89         30           20           8              20               11   0.37   0.22           5
-   PEP     85         30           20           0              20               15   0.11   0.03           5
-  COST     70         30           10           3              20                7   0.45   0.40           5
-   ADM     45         12           10           3              20                0   0.98   0.53           5
+ticker  total  roe_score  gross_score  debt_score  fcf_score  valuation_score pe_pct pb_pct  data_years
+  MSFT     89         30           20           8         20               11   0.37   0.22           5
+  ADBE     88         30           20           3         20               15   0.01   0.01           5
+  NVDA     83         30           10          15         20                8   0.26      —           5
+  COST     70         30           10           3         20                7   0.45   0.40           5
 ```
 
-判定ライン：**≥80 は堀の人手確認へ／60–80 は明確な弱点あり／<60 は本フレームに非該当**。完全なランキングは [docs/demo.md](docs/demo.md)。
+```
+=== ランキングから除外（指標が成立しない 3 銘柄）===
+ticker  total  gross_score  fcf_score  valuation_score  debt_latest                 flag
+  BKNG     48           20         20                8        119.1 权益≤0，ROE/负债率/PB 均不适用
+  ORLY     44           20         20                4        104.6 权益≤0，ROE/负债率/PB 均不适用
+  SBUX     40           20         20                0        125.3 权益≤0，ROE/负债率/PB 均不适用
+```
+
+（flag 列はスクリプト出力そのままの中国語。意味は「自己資本 ≤ 0 のため ROE・負債比率・PB いずれも適用不能」。）
+
+判定ライン：**≥80 は堀の人手確認へ／60–79 は明確な弱点あり／<60 は本フレームに非該当**。完全なランキングは [docs/demo.md](docs/demo.md)。
 
 ## スクリーニング基準
 
@@ -45,10 +55,11 @@ ticker  total  roe_score  gross_score  debt_score  cashflow_score  valuation_sco
 
 配点は [references/scoring_rules.md](references/scoring_rules.md)、堀と資本配分の判断枠組みは [references/buffett_principles.md](references/buffett_principles.md) を参照。
 
-## A 株版との意図的な違い（2 点）
+## A 株版との意図的な違い（3 点）
 
 1. **ユニバースは静的ファイル**。A 株版は沪深300 構成銘柄を実時間で取得できますが、米国全上場リストの API はネットワーク環境により到達不可の場合があるため、`data/universe_nasdaq100.json`（`source` / `as_of` / `fetched_at` 付き）を同梱しています。四半期ごとの構成変更は自分で更新するか、`--tickers` で上書きしてください。
-2. **PE/PB 分位は近似値**。米国株には日次履歴バリュエーション API が無いため、日次 PE = 終値 ÷ 当年度基本 EPS、日 PB = PE × 当年度 ROE（P/B = P/E × E/B の恒等式）で構築します。年度内で EPS・ROE 一定、開示遅延なしと仮定する近似なので、「自社履歴で割高か割安か」の判断に限定してください。
+2. **キャッシュフロー基準と歪み処理を米国株向けに再調整**：FCF に変更、負の自己資本は N/A、判定ラインは 80 に引き上げ。そのため**スコアは A 株版と直接比較できない**（`references/scoring_rules.md` 参照）。
+3. **PE/PB 分位は近似値**。米国株には日次履歴バリュエーション API が無いため、日次 PE = 終値 ÷ 当年度基本 EPS、日 PB = PE × 当年度 ROE（P/B = P/E × E/B の恒等式）で構築します。年度内で EPS・ROE 一定、開示遅延なしと仮定する近似なので、「自社履歴で割高か割安か」の判断に限定してください。
 
 ## 同梱ファイル
 
